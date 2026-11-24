@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>iOS27FakeRun · 校园跑 &amp; 定点打卡 (支持 iOS 17–27+)</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+<div class="app-shell">
+  <!-- 顶部设备连接栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-title">iOS27FakeRun</span>
+      <span class="brand-badge">免越狱 · iOS 17–27+ / &lt;17</span>
+      <span id="deviceStatusPill" class="status-pill">
+        <span class="dot"></span>
+        <span id="deviceStatusText">未连接设备</span>
+      </span>
+    </div>
+
+    <div class="device-controls">
+      <select id="deviceSelect" class="device-select" title="选择 USB 或无线配对设备">
+        <option value="">正在扫描设备...</option>
+      </select>
+      <button id="btnRefreshDevices" class="btn-dark" title="重新扫描已连接的 iPhone">刷新设备</button>
+      <button id="btnConnect" class="btn-primary">连接设备</button>
+      <button id="btnDisconnect" class="btn-dark" style="display:none;">断开</button>
+      <button id="btnResetLocation" class="btn-danger" title="立即清除虚拟定位，恢复 iPhone 真实 GPS">一键恢复真实定位</button>
+      <button id="btnPairWifi" class="btn-dark" title="在 USB 连接状态下配置无线 Wi-Fi 配对">无线配对</button>
+      <button id="btnMountDdi" class="btn-dark" title="手动下载并挂载开发者镜像 (iOS 27 一般无需手动挂载)" style="display:none;">挂载镜像</button>
+      <button id="btnRevealDevMode" class="btn-dark" title="若手机隐私设置中找不到开发者模式，点此显示开关">开发者开关</button>
+      <button id="btnOpenLogs" class="btn-dark">日志 / 手机遥控</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- 左侧控制面板 -->
+    <aside class="sidebar">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="run">🏃 模拟校园跑</button>
+        <button class="tab-btn" data-tab="pin">📍 定点定位打卡</button>
+      </div>
+
+      <div class="sidebar-body">
+        <!-- TAB 1: 模拟校园跑 -->
+        <section id="tab-run" class="tab-pane active">
+          <!-- 路线设计与手写经纬度 -->
+          <div class="card">
+            <div class="card-title">
+              <span>自定义操场/跑步路线</span>
+              <span id="routeSummary" class="card-subtitle">0 点 · 0 m</span>
+            </div>
+
+            <div class="subtabs">
+              <button class="subtab-btn active" data-subtab="draw">地图手绘 / 400m跑道</button>
+              <button class="subtab-btn" data-subtab="table">手动改经纬度</button>
+              <button class="subtab-btn" data-subtab="import">批量导入/导出</button>
+              <button class="subtab-btn" data-subtab="saved-routes">路线收藏</button>
+            </div>
+
+            <!-- 子页 1: 地图打点 + 400m 跑道生成器 -->
+            <div id="subtab-draw" class="subpane active">
+              <div class="toolbar-grid" style="margin-bottom:8px;">
+                <div class="mode-toggle">
+                  <button id="btnModeDraw" class="active" title="在右侧卫星图上点击即可依次添加路线点">点击打点</button>
+                  <button id="btnModeEdit" title="拖动已画好的节点微调位置">拖拽微调</button>
+                </div>
+                <button id="btnUndoPoint" class="btn btn-sm">撤销一点</button>
+                <button id="btnClearRoute" class="btn btn-sm">清空</button>
+                <button id="btnReverseRoute" class="btn btn-sm">反转方向</button>
+                <button id="btnSmoothRoute" class="btn btn-sm" title="用 Catmull-Rom 样条把折线弯道变平滑">弯道平滑</button>
+              </div>
+
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;cursor:pointer;">
+                <input type="checkbox" id="chkClosedLoop" checked />
+                <span>闭合跑道环形（多圈跑步时末点自动连回起点）</span>
+              </label>
+
+              <details id="trackGenDetails">
+                <summary style="cursor:pointer;font-weight:600;font-size:12px;color:var(--primary);margin-bottom:6px;">
+                  🏟️ 标准 400m 操场跑道一键生成器（卫星图没画跑道也能精准贴合）
+                </summary>
+                <div class="hint-box" style="margin-bottom:6px;">
+                  1. 点击下方【在地图选操场中心】或在地图中间直接生成；<br/>
+                  2. 拖动“旋转角度 / 直道长 / 弯道半径”实时对齐卫星图跑道白线。
+                </div>
+                <div class="toolbar-grid" style="margin-bottom:6px;">
+                  <button id="btnPickTrackCenter" class="btn btn-sm">🎯 在地图点选操场中心</button>
+                  <button id="btnGenerateTrackNow" class="btn-primary btn-sm">以当前中心生成跑道</button>
+                </div>
+                <div class="form-grid">
+                  <div class="form-row">
+                    <label>直道长度 (m): <span id="lblStraight">84.4</span></label>
+                    <input type="range" id="rngStraight" min="30" max="140" step="0.5" value="84.39" />
+                  </div>
+                  <div class="form-row">
+                    <label>弯道半径 (m): <span id="lblRadius">36.8</span></label>
+                    <input type="range" id="rngRadius" min="15" max="70" step="0.5" value="36.8" />
+                  </div>
+                  <div class="form-row">
+                    <label>旋转角度 (°): <span id="lblRotation">0</span></label>
+                    <input type="range" id="rngRotation" min="-180" max="180" step="1" value="0" />
+                  </div>
+                  <div class="form-row">
+                    <label>单圈点数 &amp; 方向</label>
+                    <div style="display:flex;gap:4px;">
+                      <input type="number" id="inpTrackPts" value="60" min="16" max="180" style="width:62px;" />
+                      <select id="selTrackDir">
+                        <option value="ccw">逆时针</option>
+                        <option value="cw">顺时针</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- 子页 2: 纯手动经纬度表格 -->
+            <div id="subtab-table" class="subpane">
+              <div class="toolbar-grid" style="margin-bottom:6px;">
+                <select id="selTableCrs" style="width:auto;">
+                  <option value="wgs84">显示/编辑: WGS-84 (iPhone真实GPS)</option>
+                  <option value="gcj02">显示/编辑: GCJ-02 (高德/腾讯图)</option>
+                </select>
+                <button id="btnAddRow" class="btn btn-sm">+ 手动加一行</button>
+              </div>
+              <div class="table-wrap">
+                <table class="wp-table">
+                  <thead>
+                    <tr>
+                      <th style="width:32px;">#</th>
+                      <th>纬度 (Lat)</th>
+                      <th>经度 (Lng)</th>
+                      <th style="width:52px;">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wpTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 子页 3: 批量粘贴导入/导出 -->
+            <div id="subtab-import" class="subpane">
+              <div class="form-grid" style="margin-bottom:6px;">
+                <div class="form-row">
+                  <label>导入坐标系</label>
+                  <select id="selImportCrs">
+                    <option value="wgs84">WGS-84 (GPS / GPX)</option>
+                    <option value="gcj02">GCJ-02 (高德 / 腾讯)</option>
+                    <option value="bd09">BD-09 (原版 iOSFakeRun / 百度)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>纯文本顺序 / 上传文件</label>
+                  <div style="display:flex;gap:4px;align-items:center;">
+                    <label style="display:flex;align-items:center;gap:3px;font-size:11px;margin:0;white-space:nowrap;">
+                      <input type="checkbox" id="chkLngFirst" /> 经度在前
+                    </label>
+                    <input type="file" id="fileRouteImport" accept=".gpx,.json,.txt,.csv" style="font-size:11px;padding:2px;" />
+                  </div>
+                </div>
+              </div>
+              <textarea id="txtImportRoute" class="code-box" placeholder='支持粘贴：
+1) 原版 iOSFakeRun JSON: [{"lat":39.9,"lng":116.3}, ...]
+2) 每行一个坐标: 39.989123, 116.312456
+3) GPX 轨迹 XML 内容'></textarea>
+              <div class="toolbar-grid" style="margin-top:6px;">
+                <button id="btnParseImport" class="btn-primary btn-sm">解析并加载到地图</button>
+                <button id="btnExportJsonBd09" class="btn btn-sm">复制原版 JSON (BD-09)</button>
+                <button id="btnExportJsonWgs84" class="btn btn-sm">复制 JSON (WGS-84)</button>
+                <button id="btnExportGpx" class="btn btn-sm">下载 GPX</button>
+              </div>
+            </div>
+
+            <!-- 子页 4: 常用路线收藏 -->
+            <div id="subtab-saved-routes" class="subpane">
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <input type="text" id="inpSaveRouteName" placeholder="输入路线名称（如：东操场 400m）" />
+                <button id="btnSaveCurrentRoute" class="btn-primary btn-sm" style="white-space:nowrap;">保存当前路线</button>
+              </div>
+              <div id="savedRoutesList" class="saved-list"></div>
+            </div>
+          </div>
+
+          <!-- 跑步参数与控制 -->
+          <div class="card">
+            <div class="card-title">
+              <span>跑步参数（支持跑步途中实时调速）</span>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-row">
+                <label>速度 (m/s)</label>
+                <input type="number" id="inpSpeedMps" value="3.2" min="0.5" max="20" step="0.1" />
+              </div>
+              <div class="form-row">
+                <label>等效配速 (分'秒"/km)</label>
+                <input type="text" id="inpPaceStr" value="5'13&quot;" placeholder="如 5'00&quot;" />
+              </div>
+
+              <div class="form-row">
+                <label>目标模式</label>
+                <select id="selLimitMode">
+                  <option value="laps">按圈数跑步</option>
+                  <option value="distance">按目标总里程 (m)</option>
+                </select>
+              </div>
+              <div class="form-row" id="rowLaps">
+                <label>循环圈数</label>
+                <input type="number" id="inpLaps" value="5" min="1" max="500" step="1" />
+              </div>
+              <div class="form-row" id="rowDistance" style="display:none;">
+                <label>目标里程 (米)</label>
+                <input type="number" id="inpTargetDistance" value="2000" min="50" max="100000" step="100" />
+              </div>
+
+              <div class="form-row">
+                <label>速度随机波动 (±%)</label>
+                <input type="number" id="inpSpeedJitter" value="8" min="0" max="35" step="1" />
+              </div>
+              <div class="form-row">
+                <label>轨迹自然漂移 (米)</label>
+                <input type="number" id="inpGpsDrift" value="0.8" min="0" max="5" step="0.1" />
+              </div>
+              <div class="form-row">
+                <label>定位推送间隔 (秒)</label>
+                <input type="number" id="inpInterval" value="1.0" min="0.3" max="3.0" step="0.1" />
+              </div>
+              <div class="form-row" style="justify-content:flex-end;">
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-top:16px;">
+                  <input type="checkbox" id="chkSmoothRun" />
+                  <span>运行时自动平滑弯道</span>
+                </label>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button id="btnStartRun" class="btn-success btn-block">▶ 开始模拟校园跑</button>
+              <button id="btnPauseRun" class="btn-warning btn-block" style="display:none;">⏸ 暂停</button>
+              <button id="btnResumeRun" class="btn-primary btn-block" style="display:none;">▶ 继续</button>
+              <button id="btnStopRun" class="btn-danger" style="display:none;white-space:nowrap;">⏹ 停止</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: 定点定位打卡 -->
+        <section id="tab-pin" class="tab-pane">
+          <div class="card">
+            <div class="card-title">
+              <span>选择或手动输入打卡坐标</span>
+              <span class="card-subtitle">点击右侧地图即可选点</span>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-row">
+                <label>输入坐标系</label>
+                <select id="selPinCrs">
+                  <option value="wgs84">WGS-84 (GPS 原生)</option>
+                  <option value="gcj02">GCJ-02 (高德/腾讯)</option>
+                  <option value="bd09">BD-09 (百度)</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>防回弹微抖动 (米)</label>
+                <input type="number" id="inpPinDrift" value="0" min="0" max="3" step="0.2" />
+              </div>
+              <div class="form-row">
+                <label>纬度 (Latitude)</label>
+                <input type="number" id="inpPinLat" step="0.000001" placeholder="如 39.992800" />
+              </div>
+              <div class="form-row">
+                <label>经度 (Longitude)</label>
+                <input type="number" id="inpPinLng" step="0.000001" placeholder="如 116.310200" />
+              </div>
+            </div>
+
+            <div id="pinCoordPreview" class="coord-chip" style="margin-top:8px;">
+              WGS-84: - , - &nbsp;|&nbsp; GCJ-02: - , -
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button id="btnLockPin" class="btn-primary btn-block">📌 锁定此定位（开始打卡）</button>
+              <button id="btnStopPin" class="btn-danger" style="display:none;white-space:nowrap;">解除并恢复真实GPS</button>
+            </div>
+          </div>
+
+          <!-- 位置微调方向盘 -->
+          <div class="card">
+            <div class="card-title">
+              <span>签到点方向微调</span>
+              <select id="selNudgeStep" style="width:auto;">
+                <option value="5">步长 5 米</option>
+                <option value="15" selected>步长 15 米</option>
+                <option value="50">步长 50 米</option>
+              </select>
+            </div>
+            <div class="nudge-grid">
+              <div></div>
+              <button class="btn" data-nudge="n">⬆ 北</button>
+              <div></div>
+              <button class="btn" data-nudge="w">⬅ 西</button>
+              <div class="nudge-center">微调</div>
+              <button class="btn" data-nudge="e">东 ➡</button>
+              <div></div>
+              <button class="btn" data-nudge="s">⬇ 南</button>
+              <div></div>
+            </div>
+          </div>
+
+          <!-- 常用打卡点收藏 -->
+          <div class="card">
+            <div class="card-title"><span>常用打卡点收藏夹</span></div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+              <input type="text" id="inpSavePinName" placeholder="备注名称（如：教学楼A座 / 体育馆）" />
+              <button id="btnSavePin" class="btn-primary btn-sm" style="white-space:nowrap;">收藏当前点</button>
+            </div>
+            <div id="savedPinsList" class="saved-list"></div>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- 右侧卫星图 -->
+    <section class="map-pane">
+      <div class="map-search-bar">
+        <div class="search-box">
+          <input type="text" id="inpMapSearch" placeholder="搜学校/地名，或直接输 纬度,经度 飞往操场" />
+          <button id="btnMapSearch" class="btn-primary btn-sm">跳转</button>
+        </div>
+        <div class="layer-select-wrap">
+          <select id="selBaseMap" title="切换地图底图与坐标系">
+            <option value="amap_sat_label">高德卫星+路网 (GCJ-02 · 推荐操场)</option>
+            <option value="amap_sat">高德纯卫星图 (GCJ-02)</option>
+            <option value="amap_vec">高德标准地图 (GCJ-02)</option>
+            <option value="esri_sat">Esri 全球高清卫星 (WGS-84)</option>
+            <option value="osm">OpenStreetMap (WGS-84)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="searchResults" class="search-results"></div>
+      <div id="map"></div>
+
+      <!-- 实时模拟仪表盘浮窗 -->
+      <div class="hud-overlay">
+        <div class="hud-header">
+          <span id="hudMessage">空闲：在地图画跑道或选定打卡位置后即可开始</span>
+          <span id="hudCoord" style="font-family:Consolas,monospace;color:#93c5fd;">-</span>
+        </div>
+        <div class="hud-stats">
+          <div class="hud-stat">
+            <div class="hud-stat-label">已跑里程 / 目标</div>
+            <div id="hudDistance" class="hud-stat-value">0 m / 0 m</div>
+          </div>
+          <div class="hud-stat">
+            <div class="hud-stat-label">当前圈数</div>
+            <div id="hudLap" class="hud-stat-value">0 / 0</div>
+          </div>
+          <div class="hud-stat">
+            <div class="hud-stat-label">实时配速 / 速度</div>
+            <div id="hudPace" class="hud-stat-value">- / 0.0 m/s</div>
+          </div>
+          <div class="hud-stat">
+            <div class="hud-stat-label">已用时 / 预计剩余</div>
+            <div id="hudTime" class="hud-stat-value">00:00 / 00:00</div>
+          </div>
+        </div>
+        <div class="progress-track">
+          <div id="hudProgress" class="progress-fill"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 日志与手机遥控弹窗 -->
+<div id="logsModal" class="modal-backdrop">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>运行日志 &amp; 安卓手机局域网遥控地址</span>
+      <button id="btnCloseLogs" class="btn btn-sm">关闭</button>
+    </div>
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);background:#f8fafc;font-size:12px;">
+      <div><strong>安卓手机操控方法：</strong>使用项目根目录的 <code>局域网远程启动.bat</code> 启动服务，手机连接同一 Wi-Fi 后用浏览器打开以下地址即可直接控制：</div>
+      <div id="lanUrlsBox" style="margin-top:4px;font-family:Consolas,monospace;color:var(--primary);"></div>
+    </div>
+    <div id="logsBody" class="modal-body"></div>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container"></div>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/js/coords.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
