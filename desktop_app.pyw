@@ -2,45 +2,52 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-VENV_DIR = BASE_DIR / ".venv"
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = DATA_DIR / "desktop.log"
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
-if str(BASE_DIR) not in sys.path:
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+BASE_DIR = Path(sys.executable).resolve().parent if IS_FROZEN else Path(__file__).resolve().parent
+
+if not IS_FROZEN and str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-# If launched directly by double-clicking desktop_app.pyw with system Python,
-# immediately re-launch under .venv so all dependencies (uvicorn, pywebview, pymobiledevice3) resolve.
-if sys.platform == "win32" and VENV_DIR.exists() and not os.environ.get("IOS27FAKERUN_BOOTSTRAPPED"):
-    try:
-        in_venv = Path(sys.prefix).resolve() == VENV_DIR.resolve()
-    except OSError:
-        in_venv = False
-    if not in_venv:
-        exe_name = Path(sys.executable).name.lower()
-        target_name = "pythonw.exe" if "pythonw" in exe_name else "python.exe"
-        target_py = VENV_DIR / "Scripts" / target_name
-        if not target_py.exists():
-            target_py = VENV_DIR / "Scripts" / "pythonw.exe"
-        if target_py.exists():
-            env = os.environ.copy()
-            env["IOS27FAKERUN_BOOTSTRAPPED"] = "1"
-            subprocess.Popen(
-                [str(target_py), str(Path(__file__).resolve()), *sys.argv[1:]],
-                cwd=str(BASE_DIR),
-                env=env,
-            )
-            sys.exit(0)
+# If launched from source via system Python instead of .venv, re-launch inside .venv.
+if not IS_FROZEN and sys.platform == "win32" and not os.environ.get("IOS27FAKERUN_BOOTSTRAPPED"):
+    VENV_DIR = BASE_DIR / ".venv"
+    if VENV_DIR.exists():
+        try:
+            in_venv = Path(sys.prefix).resolve() == VENV_DIR.resolve()
+        except OSError:
+            in_venv = False
+        if not in_venv:
+            exe_name = Path(sys.executable).name.lower()
+            target_name = "pythonw.exe" if "pythonw" in exe_name else "python.exe"
+            target_py = VENV_DIR / "Scripts" / target_name
+            if not target_py.exists():
+                target_py = VENV_DIR / "Scripts" / "pythonw.exe"
+            if target_py.exists():
+                env = os.environ.copy()
+                env["IOS27FAKERUN_BOOTSTRAPPED"] = "1"
+                subprocess.Popen(
+                    [str(target_py), str(Path(__file__).resolve()), *sys.argv[1:]],
+                    cwd=str(BASE_DIR),
+                    env=env,
+                )
+                sys.exit(0)
 
-# pythonw.exe sets sys.stdout / sys.stderr to None on Windows, which crashes libraries
-# that call .isatty() or write to stdio unless redirected first.
+from backend.paths import APP_VERSION, get_data_dir
+
+DATA_DIR = get_data_dir()
+LOG_FILE = DATA_DIR / "desktop.log"
+
+# pythonw.exe / PyInstaller windowed EXEs set sys.stdout / sys.stderr to None on Windows,
+# which crashes libraries calling .isatty() or writing to stdio unless redirected first.
 if sys.stdout is None or sys.stderr is None:
     _log_fp = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
     if sys.stdout is None:
@@ -133,7 +140,7 @@ def main() -> None:
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     port = _pick_port(args.port)
-    _log(f"Starting backend on {host}:{port}")
+    _log(f"Starting backend v{APP_VERSION} on {host}:{port} (frozen={IS_FROZEN})")
     app = create_app(server_port=port)
 
     config = uvicorn.Config(
@@ -171,7 +178,7 @@ def main() -> None:
     try:
         import webview  # type: ignore[import-untyped]
 
-        title = "iOS27FakeRun — iOS 27 免越狱校园跑 & 定点定位打卡"
+        title = f"iOS27FakeRun v{APP_VERSION} — iOS 27 免越狱校园跑 & 定点定位打卡"
         if args.lan:
             title += " [局域网遥控已开启]"
         _log("Launching pywebview edgechromium window")

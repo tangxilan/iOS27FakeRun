@@ -31,9 +31,27 @@
       <button id="btnPairWifi" class="btn-dark" title="在 USB 连接状态下配置无线 Wi-Fi 配对">无线配对</button>
       <button id="btnMountDdi" class="btn-dark" title="手动下载并挂载开发者镜像 (iOS 27 一般无需手动挂载)" style="display:none;">挂载镜像</button>
       <button id="btnRevealDevMode" class="btn-dark" title="若手机隐私设置中找不到开发者模式，点此显示开关">开发者开关</button>
+      <button id="btnOpenEnvCheck" class="btn-dark btn-badge-wrap" title="检测 Apple 驱动、WebView2 与设备连接环境">
+        环境检测<span id="envAlertDot" class="badge-dot" style="display:none;"></span>
+      </button>
+      <button id="btnOpenGuide" class="btn-dark" title="打开新手图文引导教程">新手教程</button>
       <button id="btnOpenLogs" class="btn-dark">日志 / 手机遥控</button>
     </div>
   </header>
+
+  <!-- 环境异常自动提醒横幅 -->
+  <div id="envWarningBanner" class="env-banner" style="display:none;">
+    <div class="env-banner-text">
+      <strong id="envBannerTitle">⚠️ 未检测到 Apple 手机驱动（Apple Mobile Device Service）</strong>
+      <span id="envBannerDesc">没有驱动将无法识别 USB 连接的 iPhone，请先安装微软商店的【Apple 设备】或官网【iTunes】。</span>
+    </div>
+    <div class="env-banner-actions">
+      <button id="btnBannerAppleDevices" class="btn-primary btn-sm">微软商店安装 Apple 设备</button>
+      <button id="btnBannerItunes" class="btn btn-sm">下载 iTunes 64位</button>
+      <button id="btnBannerRecheck" class="btn btn-sm">重新检测</button>
+      <button id="btnBannerDismiss" class="btn-sm btn-ghost" title="暂时关闭横幅">×</button>
+    </div>
+  </div>
 
   <main class="workspace">
     <!-- 左侧控制面板 -->
@@ -326,7 +344,8 @@
     <section class="map-pane">
       <div class="map-search-bar">
         <div class="search-box">
-          <input type="text" id="inpMapSearch" placeholder="搜学校/地名，或直接输 纬度,经度 飞往操场" />
+          <input type="text" id="inpMapSearch" placeholder="搜学校/校区（如 西安建筑科技大学），或输 纬度,经度" />
+          <button id="btnClearSearch" class="btn-icon-clear" title="清空并关闭搜索列表" style="display:none;">×</button>
           <button id="btnMapSearch" class="btn-primary btn-sm">跳转</button>
         </div>
         <div class="layer-select-wrap">
@@ -387,6 +406,128 @@
       <div id="lanUrlsBox" style="margin-top:4px;font-family:Consolas,monospace;color:var(--primary);"></div>
     </div>
     <div id="logsBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- 新手引导 & 环境自检弹窗 -->
+<div id="guideModal" class="modal-backdrop">
+  <div class="modal-card guide-card">
+    <div class="modal-header">
+      <span>📖 iOS27FakeRun 新手引导与环境自检</span>
+      <button id="btnCloseGuide" class="btn btn-sm">关闭</button>
+    </div>
+
+    <div class="guide-steps-bar" id="guideStepsBar">
+      <button class="guide-step-pill active" data-step="0">1. 环境检测</button>
+      <button class="guide-step-pill" data-step="1">2. 开发者模式</button>
+      <button class="guide-step-pill" data-step="2">3. 模拟校园跑</button>
+      <button class="guide-step-pill" data-step="3">4. 定点打卡</button>
+      <button class="guide-step-pill" data-step="4">5. 恢复与无线</button>
+    </div>
+
+    <div class="guide-body">
+      <!-- Step 1: 环境检测 -->
+      <div class="guide-pane active" data-guide-pane="0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div>
+            <div style="font-size:15px;font-weight:700;">电脑运行环境自动检测</div>
+            <div style="font-size:12px;color:var(--muted);">缺少任何必要组件时，可直接点击对应下载按钮安装，装完后点“重新检测”。</div>
+          </div>
+          <button id="btnGuideRecheck" class="btn-primary btn-sm">🔄 重新检测</button>
+        </div>
+        <div id="envCardsContainer" class="env-cards-grid"></div>
+      </div>
+
+      <!-- Step 2: 开启开发者模式 -->
+      <div class="guide-pane" data-guide-pane="1">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px;">iPhone 开启“开发者模式”（每台手机只需设置一次）</div>
+        <div class="guide-grid">
+          <div class="guide-info-card">
+            <div class="guide-num">1</div>
+            <strong>USB 插线并信任电脑</strong>
+            <p>用支持传数据的线连接 iPhone 和电脑，解锁手机屏幕并在弹窗点<strong>信任此电脑</strong>。</p>
+          </div>
+          <div class="guide-info-card">
+            <div class="guide-num">2</div>
+            <strong>打开开发者模式开关</strong>
+            <p>打开 iPhone：<strong>设置 → 隐私与安全性 → 开发者模式</strong>，打开开关并按提示重启手机。</p>
+          </div>
+          <div class="guide-info-card">
+            <div class="guide-num">3</div>
+            <strong>重启后二次确认</strong>
+            <p>重启进入桌面后会弹窗询问是否开启开发者模式，点<strong>开启</strong>并输入锁屏密码即可。</p>
+          </div>
+        </div>
+        <div class="hint-box" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span>💡 <strong>手机设置里找不到“开发者模式”？</strong>插好数据线后点右侧按钮，软件会自动把它调出来：</span>
+          <button id="btnGuideRevealDev" class="btn-primary btn-sm" style="white-space:nowrap;">显示开发者开关</button>
+        </div>
+      </div>
+
+      <!-- Step 3: 模拟校园跑 -->
+      <div class="guide-pane" data-guide-pane="2">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px;">如何模拟校园跑（无需地图画好跑道）</div>
+        <div class="guide-list">
+          <div class="guide-list-item">
+            <strong>① 搜学校飞到操场：</strong>在右侧卫星图上方输入学校或校区名（例如 <code>西安建筑科技大学</code>，或直接输 <code>纬度,经度</code>），点击结果即可飞过去，点 <code>× 关闭</code> 可收起列表。
+          </div>
+          <div class="guide-list-item">
+            <strong>② 3 种方式画跑道：</strong>
+            <ul>
+              <li><strong>400m 标准跑道生成器（最推荐）</strong>：点操场正中心，拖动直道/半径/旋转角度滑块直接对齐卫星图白线；</li>
+              <li><strong>卫星图点击打点</strong>：自己沿操场点出一圈，支持<strong>拖拽微调</strong>和<strong>弯道平滑</strong>；</li>
+              <li><strong>手动改经纬度 / 导入导出</strong>：可在表格里逐行填写精确经纬度，也兼容原版 <code>iOSFakeRun</code> JSON 与 GPX 文件。</li>
+            </ul>
+          </div>
+          <div class="guide-list-item">
+            <strong>③ 调好配速开跑：</strong>设置速度（如 <code>3.2 m/s</code>）和圈数后点 <strong>开始模拟校园跑</strong>，跑步过程中也能随时调速。跑完后软件会保持终点定位，<strong>先在手机 App 里点结束并提交成绩</strong>！
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: 定点打卡 -->
+      <div class="guide-pane" data-guide-pane="3">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px;">如何精确锁定打卡位置</div>
+        <div class="guide-list">
+          <div class="guide-list-item">
+            <strong>① 选点或输坐标：</strong>切到左侧 <strong>📍 定点定位打卡</strong>，直接点击卫星图上的教学楼/实验楼，或者手动输入纬度、经度（注意选对坐标系：高德/腾讯为 <code>GCJ-02</code>，百度为 <code>BD-09</code>，GPS 原生为 <code>WGS-84</code>）。
+          </div>
+          <div class="guide-list-item">
+            <strong>② 锁定防回弹：</strong>点击 <strong>📌 锁定此定位（开始打卡）</strong>，软件会持续维持虚拟位置，防止 iPhone 自动跳回真实 GPS。
+          </div>
+          <div class="guide-list-item">
+            <strong>③ 方向盘微调与收藏：</strong>如果打卡范围差几十米，直接点东南西北按钮（<code>5m / 15m / 50m</code>）微调；常用教室可点 <strong>收藏当前点</strong> 保存，下次一点直达。
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5: 安全提醒与无线玩法 -->
+      <div class="guide-pane" data-guide-pane="4">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px;">使用完毕务必恢复真实 GPS + 进阶无线玩法</div>
+        <div class="guide-list">
+          <div class="guide-list-item" style="border-left:4px solid var(--danger);background:var(--danger-soft);">
+            <strong>⚠️ 重要提醒：</strong>每次跑完步或打完卡，务必点击顶部红色按钮 <strong>一键恢复真实定位</strong>（或重启 iPhone），否则手机导航、外卖定位会一直停留在模拟位置。
+          </div>
+          <div class="guide-list-item">
+            <strong>📶 Wi-Fi 无线连接 iPhone：</strong>插 USB 时点顶部 <strong>无线配对</strong>，成功后下次电脑和 iPhone 连同一 Wi-Fi，不插线也能直接连接定位。
+          </div>
+          <div class="guide-list-item">
+            <strong>📱 安卓手机遥控苹果手机：</strong>双击文件夹里的 <code>局域网远程启动.bat</code>，点顶部 <strong>日志 / 手机遥控</strong> 查看局域网网址，用安卓手机浏览器打开就能远程操作。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="guide-footer">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="chkDontShowGuide" />
+        <span>下次启动不再自动弹出（随时可点右上角【新手教程】打开）</span>
+      </label>
+      <div style="display:flex;gap:8px;">
+        <button id="btnGuidePrev" class="btn">上一步</button>
+        <button id="btnGuideNext" class="btn-primary">下一步</button>
+      </div>
+    </div>
   </div>
 </div>
 

@@ -1,0 +1,66 @@
+name: Build & Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.1.0)"
+        required: false
+        default: "v1.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run pytest suite
+        run: python -m pytest -v
+
+      - name: Build Windows EXE & ZIP
+        shell: pwsh
+        run: |
+          $ver = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } elseif ("${{ inputs.tag }}") { "${{ inputs.tag }}" } else { "v1.1.0" }
+          python build_exe.py --version "$ver"
+          echo "RELEASE_TAG=$ver" >> $env:GITHUB_ENV
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "iOS27FakeRun ${{ github.ref_name }}"
+          generate_release_notes: true
+          body: |
+            ## iOS27FakeRun ${{ github.ref_name }} (Windows 64位免安装版)
+
+            ### 下载与使用（给同学的极简步骤）
+            1. 下载下方附件 **`iOS27FakeRun-${{ github.ref_name }}-win64.zip`** 并完整解压到一个文件夹；
+            2. 双击文件夹里的 **`iOS27FakeRun.exe`** 启动桌面端（无需安装 Python！首次启动会自动弹出**环境检测与新手引导**，如缺少 Apple 手机驱动按弹窗按钮安装即可）；
+            3. iPhone 开启 **设置 → 隐私与安全性 → 开发者模式** 后用数据线连接电脑，点击顶部 **连接设备** 即可开始校园跑或定点打卡；
+            4. 需要用安卓手机遥控时，双击同目录下的 **`局域网远程启动.bat`**。
+
+            ### 本版更新亮点
+            - **多源校园搜索升级**：聚合 Photon + ArcGIS + OSM 三大搜索源，精准支持高校分校区（如“西安建筑科技大学草堂校区”等），搜索框与结果列表新增清空和关闭按钮；
+            - **内置 5 步新手引导教程**：覆盖环境检测、开发者模式、校园跑、定点打卡与安全恢复；
+            - **自动环境检测与下载引导**：自动检测 Apple 驱动（Apple 设备 / iTunes）与 WebView2 状态，缺失时直接弹出引导与官方下载链接；
+            - **独立 EXE 打包**：开箱即用，告别环境配置报错。
+          files: dist/iOS27FakeRun-*-win64.zip

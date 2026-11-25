@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import socket
+import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -19,6 +20,9 @@ from pydantic import BaseModel, Field
 
 from .coords import from_wgs84, to_wgs84, wgs84_to_gcj02
 from .device_manager import DeviceManager
+from .env_check import check_environment, is_allowed_external_url
+from .geocode import search_places
+from .paths import APP_VERSION, get_data_dir, get_resource_dir
 from .route_utils import (
     export_gpx,
     export_iosfakerun_json,
@@ -30,9 +34,8 @@ from .route_utils import (
 from .simulation_engine import PinConfig, RunConfig, SimulationEngine
 from .storage import LocalStorage
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-STATIC_DIR = BASE_DIR / "static"
-DATA_DIR = BASE_DIR / "data"
+STATIC_DIR = get_resource_dir() / "static"
+DATA_DIR = get_data_dir()
 
 
 class WsHub:
@@ -193,6 +196,10 @@ class LastStateRequest(BaseModel):
     state: dict[str, Any]
 
 
+class OpenUrlRequest(BaseModel):
+    url: str
+
+
 def create_app(
     device_manager: Optional[DeviceManager] = None,
     storage: Optional[LocalStorage] = None,
@@ -223,7 +230,7 @@ def create_app(
         with contextlib.suppress(Exception):
             await dm.disconnect(clear_location=False)
 
-    app = FastAPI(title="iOS27FakeRun", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="iOS27FakeRun", version=APP_VERSION, lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -246,7 +253,25 @@ def create_app(
     # --- Health & Snapshot ---
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        return {"ok": True, "version": "1.0.0"}
+        return {"ok": True, "version": APP_VERSION}
+
+    @app.get("/api/env-check")
+    async def env_check() -> dict[str, Any]:
+        return check_environment()
+
+    @app.post("/api/system/open-url")
+    async def system_open_url(req: OpenUrlRequest) -> dict[str, Any]:
+        if not is_allowed_external_url(req.url):
+            raise HTTPException(status_code=400, detail="仅支持打开 https:// 或 ms-windows-store:// 链接")
+        target = req.url.strip()
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(target)  # type: ignore[attr-defined]
+            else:
+                webbrowser.open(target)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"无法打开外部链接: {exc}") from exc
+        return {"ok": True}
 
     @app.get("/api/state")
     async def get_state() -> dict[str, Any]:
@@ -527,27 +552,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="打卡点不存在")
         return {"ok": True}
 
-    # --- Optional place search proxy ---
+    # --- Multi-source place search proxy ---
     @app.get("/api/geocode")
     async def geocode(q: str = Query(..., min_length=1)) -> list[dict[str, Any]]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": q, "format": "jsonv2", "limit": 6, "accept-language": "zh-CN"},
-                    headers={"User-Agent": "iOS27FakeRun/1.0"},
-                )
-                resp.raise_for_status()
-                items = resp.json()
-                return [
-                    {
-                        "name": item.get("display_name", q),
-                        "lat": float(item["lat"]),
-                        "lng": float(item["lon"]),
-                    }
-                    for item in items
-                    if "lat" in item and "lon" in item
-                ]
+            return await search_places(q, limit=15)
         except Exception:
             return []
 

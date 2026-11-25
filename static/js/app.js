@@ -16,6 +16,8 @@
     savedRoutes: [],
     savedPins: [],
     logs: [],
+    envInfo: null,
+    guideStep: 0,
   };
 
   // --- Map & Layer definitions ---
@@ -363,6 +365,7 @@
 
   // --- Map Click handling ---
   map.on('click', (ev) => {
+    hideSearchResults();
     const [wLat, wLng] = mapToWgs(ev.latlng.lat, ev.latlng.lng);
     if (state.pickingTrackCenter) {
       state.pickingTrackCenter = false;
@@ -1092,10 +1095,30 @@
   });
 
   // --- Place Search & Direct Coordinate Jump ---
+  function hideSearchResults() {
+    const resBox = $('searchResults');
+    if (resBox) resBox.style.display = 'none';
+  }
+
+  function updateClearSearchVisibility() {
+    const hasVal = Boolean($('inpMapSearch').value.trim()) || $('searchResults').style.display === 'block';
+    $('btnClearSearch').style.display = hasVal ? 'inline-flex' : 'none';
+  }
+
+  $('inpMapSearch').addEventListener('input', updateClearSearchVisibility);
+
+  $('btnClearSearch').addEventListener('click', () => {
+    $('inpMapSearch').value = '';
+    hideSearchResults();
+    updateClearSearchVisibility();
+    $('inpMapSearch').focus();
+  });
+
   async function performSearch() {
     const q = $('inpMapSearch').value.trim();
     const resBox = $('searchResults');
-    resBox.style.display = 'none';
+    hideSearchResults();
+    updateClearSearchVisibility();
     if (!q) return;
 
     // Check direct "lat, lng" input
@@ -1111,28 +1134,84 @@
       }
     }
 
+    $('btnMapSearch').disabled = true;
+    $('btnMapSearch').textContent = '搜索中...';
     try {
       const items = await api(`/api/geocode?q=${encodeURIComponent(q)}`);
       if (!items.length) {
-        toast('未搜索到地点，可直接输入“纬度,经度”跳转', 'warn');
+        toast('未搜索到地点，可尝试加上城市/校区名或直接输入“纬度,经度”', 'warn');
         return;
       }
       resBox.innerHTML = '';
+
+      const header = document.createElement('div');
+      header.className = 'search-results-header';
+      header.innerHTML = `<span>找到 ${items.length} 个相关地点（点击即可飞往）</span>`;
+      const closeBtn = document.createElement('button');
+      closeBtn.id = 'btnCloseSearchResults';
+      closeBtn.className = 'btn btn-sm';
+      closeBtn.textContent = '× 关闭';
+      closeBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        hideSearchResults();
+        updateClearSearchVisibility();
+      });
+      header.appendChild(closeBtn);
+      resBox.appendChild(header);
+
       items.forEach((item) => {
         const div = document.createElement('div');
         div.className = 'search-result-item';
-        div.textContent = item.name;
+        const titleRow = document.createElement('div');
+        titleRow.className = 'search-result-title';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = item.name;
+        const srcSpan = document.createElement('span');
+        srcSpan.className = 'search-source-tag';
+        srcSpan.textContent = item.source || '地图';
+        titleRow.appendChild(nameSpan);
+        titleRow.appendChild(srcSpan);
+
+        const addrDiv = document.createElement('div');
+        addrDiv.className = 'search-result-addr';
+        addrDiv.textContent = item.address || `${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}`;
+
+        div.appendChild(titleRow);
+        div.appendChild(addrDiv);
         div.addEventListener('click', () => {
-          resBox.style.display = 'none';
+          hideSearchResults();
+          updateClearSearchVisibility();
           map.setView(wgsToMap(item.lat, item.lng), 17);
+          if (state.activeTab === 'pin') setPinFromWgs(item.lat, item.lng, false);
+          toast(`已定位到：${item.name}`, 'success');
         });
         resBox.appendChild(div);
       });
       resBox.style.display = 'block';
+      updateClearSearchVisibility();
     } catch {
       toast('在线地名搜索暂时不可用，请直接拖拽地图或输入“纬度,经度”', 'warn');
+    } finally {
+      $('btnMapSearch').disabled = false;
+      $('btnMapSearch').textContent = '跳转';
     }
   }
+
+  document.addEventListener('click', (ev) => {
+    const bar = document.querySelector('.map-search-bar');
+    const resBox = $('searchResults');
+    if (resBox.style.display !== 'block') return;
+    if ((bar && bar.contains(ev.target)) || resBox.contains(ev.target)) return;
+    hideSearchResults();
+    updateClearSearchVisibility();
+  });
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      hideSearchResults();
+      updateClearSearchVisibility();
+    }
+  });
 
   $('btnMapSearch').addEventListener('click', performSearch);
   $('inpMapSearch').addEventListener('keydown', (ev) => {
@@ -1141,6 +1220,218 @@
 
   $('selBaseMap').addEventListener('change', (ev) => {
     setBaseMap(ev.target.value);
+  });
+
+  // --- Environment Detection & Onboarding Guide ---
+  const GUIDE_STORAGE_KEY = 'ios27fakerun_guide_v11_dismissed';
+
+  async function openExternalUrl(url) {
+    try {
+      await api('/api/system/open-url', 'POST', { url });
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function makeEnvCard({ title, statusClass, statusText, desc, actions = [] }) {
+    const card = document.createElement('div');
+    card.className = `env-card ${statusClass}`;
+    card.innerHTML = `
+      <div class="env-card-head">
+        <span></span>
+        <span class="env-status-tag"></span>
+      </div>
+      <div class="env-card-desc"></div>
+      <div class="env-card-actions"></div>
+    `;
+    card.querySelector('.env-card-head span:first-child').textContent = title;
+    card.querySelector('.env-status-tag').textContent = statusText;
+    card.querySelector('.env-card-desc').textContent = desc;
+    const actBox = card.querySelector('.env-card-actions');
+    actions.forEach((act) => {
+      const btn = document.createElement('button');
+      btn.className = act.primary ? 'btn-primary btn-sm' : 'btn btn-sm';
+      btn.textContent = act.label;
+      btn.addEventListener('click', act.onClick);
+      actBox.appendChild(btn);
+    });
+    return card;
+  }
+
+  async function runEnvironmentCheck(openIfMissing = false) {
+    try {
+      const [env, devs] = await Promise.all([
+        api('/api/env-check'),
+        api('/api/devices').catch(() => ({ usb: [], wifi: [] })),
+      ]);
+      state.envInfo = env;
+
+      const driverOk = env.apple_driver && env.apple_driver.status === 'ok';
+      $('envAlertDot').style.display = driverOk ? 'none' : 'block';
+      $('envWarningBanner').style.display = driverOk ? 'none' : 'flex';
+      if (!driverOk && env.apple_driver) {
+        $('envBannerTitle').textContent = `⚠️ ${env.apple_driver.label}`;
+        $('envBannerDesc').textContent = env.apple_driver.detail;
+      }
+
+      const box = $('envCardsContainer');
+      if (box) {
+        box.innerHTML = '';
+        const drv = env.apple_driver || {};
+        box.appendChild(
+          makeEnvCard({
+            title: '1. Apple 手机驱动',
+            statusClass: drv.status === 'ok' ? 'ok' : 'err',
+            statusText: drv.status === 'ok' ? '已就绪' : drv.status === 'stopped' ? '未启动' : '缺失',
+            desc: drv.detail || '',
+            actions:
+              drv.status === 'ok'
+                ? []
+                : [
+                    {
+                      label: '微软商店装 Apple 设备 (推荐)',
+                      primary: true,
+                      onClick: () => openExternalUrl(drv.store_url),
+                    },
+                    {
+                      label: '下载 iTunes 64位',
+                      onClick: () => openExternalUrl(drv.itunes_url),
+                    },
+                  ],
+          })
+        );
+
+        const wv2 = env.webview2 || {};
+        box.appendChild(
+          makeEnvCard({
+            title: '2. Edge WebView2 运行库',
+            statusClass: wv2.status === 'ok' ? 'ok' : 'warn',
+            statusText: wv2.status === 'ok' ? '已就绪' : '建议安装',
+            desc: wv2.label || '',
+            actions:
+              wv2.status === 'ok'
+                ? []
+                : [
+                    {
+                      label: '下载 WebView2 运行库',
+                      primary: true,
+                      onClick: () => openExternalUrl(wv2.download_url),
+                    },
+                  ],
+          })
+        );
+
+        const usbList = devs.usb || [];
+        const firstUsb = usbList[0];
+        box.appendChild(
+          makeEnvCard({
+            title: '3. iPhone USB 连接',
+            statusClass: usbList.length > 0 ? 'ok' : 'warn',
+            statusText: usbList.length > 0 ? `已识别 ${usbList.length} 台` : '未检测到',
+            desc: firstUsb
+              ? `${firstUsb.name} (iOS ${firstUsb.ios_version || '?'})`
+              : '请用支持传数据的线连接 iPhone，解锁手机并在弹窗点“信任此电脑”。',
+          })
+        );
+
+        const devMode = firstUsb ? firstUsb.developer_mode : null;
+        box.appendChild(
+          makeEnvCard({
+            title: '4. iPhone 开发者模式',
+            statusClass: devMode === true ? 'ok' : devMode === false ? 'err' : 'warn',
+            statusText: devMode === true ? '已开启' : devMode === false ? '未开启' : '待连接检测',
+            desc:
+              devMode === true
+                ? '开发者模式已开启，可直接点击顶部【连接设备】开始使用！'
+                : devMode === false
+                ? '请在手机【设置 → 隐私与安全性 → 开发者模式】中开启并重启手机。'
+                : '连上 iPhone 后会自动检测开发者模式状态。',
+            actions:
+              devMode === false
+                ? [
+                    {
+                      label: '显示开发者模式开关',
+                      primary: true,
+                      onClick: () => $('btnRevealDevMode').click(),
+                    },
+                  ]
+                : [],
+          })
+        );
+      }
+
+      if (openIfMissing && !driverOk) {
+        openGuideModal(0);
+      }
+      return env;
+    } catch {
+      return null;
+    }
+  }
+
+  function setGuideStep(idx) {
+    const total = 5;
+    state.guideStep = Math.max(0, Math.min(total - 1, idx));
+    document.querySelectorAll('.guide-step-pill').forEach((p) => {
+      p.classList.toggle('active', Number(p.dataset.step) === state.guideStep);
+    });
+    document.querySelectorAll('.guide-pane').forEach((pane) => {
+      pane.classList.toggle('active', Number(pane.dataset.guidePane) === state.guideStep);
+    });
+    $('btnGuidePrev').disabled = state.guideStep === 0;
+    $('btnGuideNext').textContent = state.guideStep === total - 1 ? '开始使用 ✓' : '下一步';
+  }
+
+  function openGuideModal(step = 0) {
+    setGuideStep(step);
+    $('chkDontShowGuide').checked = localStorage.getItem(GUIDE_STORAGE_KEY) === '1';
+    $('guideModal').classList.add('open');
+    runEnvironmentCheck(false);
+  }
+
+  document.querySelectorAll('.guide-step-pill').forEach((pill) => {
+    pill.addEventListener('click', () => setGuideStep(Number(pill.dataset.step)));
+  });
+  $('btnGuidePrev').addEventListener('click', () => setGuideStep(state.guideStep - 1));
+  $('btnGuideNext').addEventListener('click', () => {
+    if (state.guideStep >= 4) {
+      $('guideModal').classList.remove('open');
+    } else {
+      setGuideStep(state.guideStep + 1);
+    }
+  });
+  $('chkDontShowGuide').addEventListener('change', (ev) => {
+    localStorage.setItem(GUIDE_STORAGE_KEY, ev.target.checked ? '1' : '0');
+  });
+  $('btnOpenGuide').addEventListener('click', () => openGuideModal(0));
+  $('btnOpenEnvCheck').addEventListener('click', () => openGuideModal(0));
+  $('btnCloseGuide').addEventListener('click', () => $('guideModal').classList.remove('open'));
+  $('guideModal').addEventListener('click', (ev) => {
+    if (ev.target === $('guideModal')) $('guideModal').classList.remove('open');
+  });
+  $('btnGuideRecheck').addEventListener('click', async () => {
+    await runEnvironmentCheck(false);
+    await refreshDevices(true);
+    toast('环境与设备状态已刷新');
+  });
+  $('btnGuideRevealDev').addEventListener('click', () => $('btnRevealDevMode').click());
+
+  $('btnBannerAppleDevices').addEventListener('click', () => {
+    const drv = (state.envInfo && state.envInfo.apple_driver) || {};
+    openExternalUrl(drv.store_url || 'https://apps.microsoft.com/detail/9np83lwlpz9k');
+  });
+  $('btnBannerItunes').addEventListener('click', () => {
+    const drv = (state.envInfo && state.envInfo.apple_driver) || {};
+    openExternalUrl(drv.itunes_url || 'https://www.apple.com/itunes/download/win64');
+  });
+  $('btnBannerRecheck').addEventListener('click', async () => {
+    const env = await runEnvironmentCheck(false);
+    await refreshDevices(true);
+    if (env && env.ready) toast('Apple 驱动已就绪！', 'success');
+    else toast('仍未检测到运行中的 Apple 驱动，请安装后重试', 'warn');
+  });
+  $('btnBannerDismiss').addEventListener('click', () => {
+    $('envWarningBanner').style.display = 'none';
   });
 
   // --- Logs & LAN modal ---
@@ -1235,6 +1526,12 @@
     await refreshDevices(true);
     await loadSavedLists();
     connectWebSocket();
+
+    const env = await runEnvironmentCheck(false);
+    const dismissed = localStorage.getItem(GUIDE_STORAGE_KEY) === '1';
+    if ((env && !env.ready) || !dismissed) {
+      openGuideModal(0);
+    }
   }
 
   init();

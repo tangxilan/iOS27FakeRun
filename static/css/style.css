@@ -521,14 +521,15 @@ table.wp-table input {
 
 .search-box {
   display: flex;
+  align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.96);
   padding: 4px 6px;
   border-radius: 8px;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
   min-width: 260px;
-  max-width: 380px;
+  max-width: 420px;
   flex: 1;
 }
 
@@ -536,10 +537,32 @@ table.wp-table input {
   border: none;
   padding: 4px 6px;
   background: transparent;
+  flex: 1;
+  min-width: 0;
 }
 
 .search-box input:focus {
   box-shadow: none;
+}
+
+.btn-icon-clear {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-icon-clear:hover {
+  background: #cbd5e1;
+  color: #0f172a;
 }
 
 .layer-select-wrap {
@@ -559,18 +582,32 @@ table.wp-table input {
 
 .search-results {
   position: absolute;
-  top: 50px;
+  top: 52px;
   left: 52px;
-  width: 340px;
+  width: 390px;
   max-width: calc(100% - 64px);
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow);
   z-index: 850;
-  max-height: 240px;
+  max-height: 290px;
   overflow-y: auto;
   display: none;
+}
+
+.search-results-header {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 2;
 }
 
 .search-result-item {
@@ -582,6 +619,34 @@ table.wp-table input {
 
 .search-result-item:hover {
   background: var(--primary-soft);
+}
+
+.search-result-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.search-result-addr {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-source-tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  flex-shrink: 0;
 }
 
 /* Telemetry HUD overlay */
@@ -785,6 +850,235 @@ table.wp-table input {
   line-height: 1.5;
 }
 
+/* Environment alert banner & badge */
+.btn-badge-wrap {
+  position: relative;
+}
+
+.badge-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid #0f172a;
+}
+
+.env-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #fef3c7;
+  border-bottom: 1px solid #fcd34d;
+  color: #78350f;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.env-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.env-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #78350f;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.btn-ghost:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Onboarding tutorial modal */
+.guide-card {
+  width: 760px;
+  max-height: 88vh;
+}
+
+.guide-steps-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.guide-step-pill {
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.guide-step-pill.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.guide-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 290px;
+}
+
+.guide-pane {
+  display: none;
+}
+
+.guide-pane.active {
+  display: block;
+}
+
+.env-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.env-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.env-card.ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.env-card.warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.env-card.err {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.env-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.env-status-tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.env-card.ok .env-status-tag { background: #dcfce7; color: #166534; }
+.env-card.warn .env-status-tag { background: #fef3c7; color: #92400e; }
+.env-card.err .env-status-tag { background: #fee2e2; color: #991b1b; }
+
+.env-card-desc {
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.env-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.guide-info-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  line-height: 1.5;
+}
+
+.guide-info-card p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #334155;
+}
+
+.guide-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.guide-list-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  line-height: 1.55;
+  font-size: 12.5px;
+}
+
+.guide-list-item ul {
+  margin: 4px 0 0 18px;
+  padding: 0;
+}
+
+.guide-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 /* Mobile / Android responsive layout */
 @media (max-width: 900px) {
   .workspace {
@@ -807,5 +1101,9 @@ table.wp-table input {
   }
   .map-search-bar {
     left: 48px;
+  }
+  .env-cards-grid,
+  .guide-grid {
+    grid-template-columns: 1fr;
   }
 }
