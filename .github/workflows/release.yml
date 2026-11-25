@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.1.0)"
+        description: "Release tag (e.g. v1.2.0)"
         required: false
-        default: "v1.1.0"
+        default: "v1.2.0"
 
 permissions:
   contents: write
@@ -39,9 +39,11 @@ jobs:
       - name: Build Windows EXE & ZIP
         shell: pwsh
         run: |
-          $ver = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } elseif ("${{ inputs.tag }}") { "${{ inputs.tag }}" } else { "v1.1.0" }
-          python build_exe.py --version "$ver"
-          echo "RELEASE_TAG=$ver" >> $env:GITHUB_ENV
+          $tag = "${{ github.ref_name }}"
+          $inputTag = "${{ inputs.tag }}"
+          $ver = if ("${{ github.ref_type }}" -eq "tag" -and $tag) { $tag } elseif ($inputTag) { $inputTag } else { "v1.2.0" }
+          python build_exe.py --version $ver
+          "RELEASE_TAG=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -59,8 +61,8 @@ jobs:
             4. 需要用安卓手机遥控时，双击同目录下的 **`局域网远程启动.bat`**。
 
             ### 本版更新亮点
-            - **多源校园搜索升级**：聚合 Photon + ArcGIS + OSM 三大搜索源，精准支持高校分校区（如“西安建筑科技大学草堂校区”等），搜索框与结果列表新增清空和关闭按钮；
-            - **内置 5 步新手引导教程**：覆盖环境检测、开发者模式、校园跑、定点打卡与安全恢复；
-            - **自动环境检测与下载引导**：自动检测 Apple 驱动（Apple 设备 / iTunes）与 WebView2 状态，缺失时直接弹出引导与官方下载链接；
-            - **独立 EXE 打包**：开箱即用，告别环境配置报错。
+            - **任意跑道 & 单段路往返支持**：新增 **📍 6点自由跑道**（拖动 6 个点即可贴合任意 200m/300m/非标准场地），支持 **闭合环形 / 往返折返（某一段路两侧来回跑）/ 单程路跑** 三种路线模式；
+            - **先快后慢·体力衰减配速**：第一圈体力充沛跑得更快，后面几圈自然逐步掉速，仪表盘实时展示每圈分段配速；
+            - **拟真 Frenet 横向 GPS 漂移**：沿切线横向自然摆动 + 每圈轻微换道，告别原地倒退跳点；
+            - **多源校园搜索 + 环境自检 + 5步新手引导**（支持搜“西安建筑科技大学草堂校区”等分校区）。
           files: dist/iOS27FakeRun-*-win64.zip

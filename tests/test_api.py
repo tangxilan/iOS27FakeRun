@@ -122,3 +122,33 @@ def test_websocket_snapshot(client):
         assert msg["type"] == "snapshot"
         assert msg["data"]["device"]["connected"] is True
         assert msg["data"]["simulation"]["mode"] == "idle"
+
+
+def test_six_point_generator_and_run_start_v12(client):
+    tc, dm = client
+    six = tc.post(
+        "/api/route/generate-six-point",
+        json={"center_lat": 34.0165, "center_lng": 108.7496, "length_m": 100.0, "width_m": 50.0},
+    )
+    assert six.status_code == 200
+    pts = six.json()["points"]
+    assert len(pts) == 6
+
+    start = tc.post(
+        "/api/run/start",
+        json={
+            "points": pts,
+            "route_mode": "loop",
+            "speed_mps": 3.5,
+            "laps": 3,
+            "pace_profile": "fatigue",
+            "fatigue_pct": 20.0,
+            "gps_drift_m": 1.5,
+        },
+    )
+    assert start.status_code == 200
+    sim = start.json()["simulation"]
+    assert sim["pace_profile"] == "fatigue"
+    assert sim["route_mode"] == "loop"
+    assert len(dm.sent_coords) >= 1
+    tc.post("/api/run/stop", json={"reset_location": True})

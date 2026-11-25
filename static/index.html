@@ -78,27 +78,38 @@
               <button class="subtab-btn" data-subtab="saved-routes">路线收藏</button>
             </div>
 
-            <!-- 子页 1: 地图打点 + 400m 跑道生成器 -->
+            <!-- 子页 1: 地图打点 + 自由跑道 + 规则跑道生成器 -->
             <div id="subtab-draw" class="subpane active">
               <div class="toolbar-grid" style="margin-bottom:8px;">
                 <div class="mode-toggle">
                   <button id="btnModeDraw" class="active" title="在右侧卫星图上点击即可依次添加路线点">点击打点</button>
                   <button id="btnModeEdit" title="拖动已画好的节点微调位置">拖拽微调</button>
                 </div>
+                <button id="btnSixPointTrack" class="btn-primary btn-sm" title="在地图中间生成6个可自由拖拽的点，适合任意非400m操场或校园环线">📍 6点自由跑道</button>
                 <button id="btnUndoPoint" class="btn btn-sm">撤销一点</button>
                 <button id="btnClearRoute" class="btn btn-sm">清空</button>
                 <button id="btnReverseRoute" class="btn btn-sm">反转方向</button>
                 <button id="btnSmoothRoute" class="btn btn-sm" title="用 Catmull-Rom 样条把折线弯道变平滑">弯道平滑</button>
               </div>
 
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;cursor:pointer;">
-                <input type="checkbox" id="chkClosedLoop" checked />
-                <span>闭合跑道环形（多圈跑步时末点自动连回起点）</span>
-              </label>
+              <div class="form-grid" style="margin-bottom:8px;align-items:end;">
+                <div class="form-row">
+                  <label>路线类型（非操场/单段路也支持）</label>
+                  <select id="selRouteMode">
+                    <option value="loop">闭合环形（任意长度操场 / 环线）</option>
+                    <option value="shuttle">往返折返（某一段路来回跑）</option>
+                    <option value="open">单程路跑（起点跑向终点）</option>
+                  </select>
+                </div>
+                <div class="form-row" id="rowShuttleOffset" style="display:none;">
+                  <label>往返车道间隔 (米)</label>
+                  <input type="number" id="inpShuttleOffset" value="1.8" min="0" max="8" step="0.2" />
+                </div>
+              </div>
 
               <details id="trackGenDetails">
                 <summary style="cursor:pointer;font-weight:600;font-size:12px;color:var(--primary);margin-bottom:6px;">
-                  🏟️ 标准 400m 操场跑道一键生成器（卫星图没画跑道也能精准贴合）
+                  🏟️ 规则跑道生成器（默认 400m，可调任意周长） <span id="lblGenPerimeter" style="color:var(--muted);font-weight:400;"></span>
                 </summary>
                 <div class="hint-box" style="margin-bottom:6px;">
                   1. 点击下方【在地图选操场中心】或在地图中间直接生成；<br/>
@@ -239,19 +250,39 @@
                 <input type="number" id="inpSpeedJitter" value="8" min="0" max="35" step="1" />
               </div>
               <div class="form-row">
-                <label>轨迹自然漂移 (米)</label>
-                <input type="number" id="inpGpsDrift" value="0.8" min="0" max="5" step="0.1" />
+                <label title="沿跑道横向自然摆动 + 每圈轻微换道，不会原地倒退跳点">GPS 横向自然漂移 (米)</label>
+                <input type="number" id="inpGpsDrift" value="1.5" min="0" max="5" step="0.1" />
+              </div>
+              <div class="form-row">
+                <label>配速曲线策略</label>
+                <select id="selPaceProfile">
+                  <option value="fatigue">先快后慢 · 体力衰减（推荐）</option>
+                  <option value="steady">全程匀速稳跑</option>
+                  <option value="negative_split">前慢后快 · 后程提速</option>
+                </select>
+              </div>
+              <div class="form-row" id="rowFatiguePct">
+                <label>后程体力降速幅度 (%)</label>
+                <input type="number" id="inpFatiguePct" value="18" min="0" max="40" step="1" />
               </div>
               <div class="form-row">
                 <label>定位推送间隔 (秒)</label>
                 <input type="number" id="inpInterval" value="1.0" min="0.3" max="3.0" step="0.1" />
               </div>
               <div class="form-row" style="justify-content:flex-end;">
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-top:16px;">
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-top:8px;">
                   <input type="checkbox" id="chkSmoothRun" />
-                  <span>运行时自动平滑弯道</span>
+                  <span>运行时平滑弯道</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-top:4px;" id="rowEndSprint">
+                  <input type="checkbox" id="chkEndSprint" />
+                  <span>终点前最后8%小幅冲刺</span>
                 </label>
               </div>
+            </div>
+
+            <div id="pacePreviewChip" class="coord-chip" style="margin-top:8px;">
+              预计配速：第1圈 4'55"/km → 末圈 5'48"/km
             </div>
 
             <div style="display:flex;gap:8px;margin-top:10px;">
@@ -365,8 +396,11 @@
       <!-- 实时模拟仪表盘浮窗 -->
       <div class="hud-overlay">
         <div class="hud-header">
-          <span id="hudMessage">空闲：在地图画跑道或选定打卡位置后即可开始</span>
-          <span id="hudCoord" style="font-family:Consolas,monospace;color:#93c5fd;">-</span>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span id="hudPhaseBadge" class="hud-phase-badge">待机</span>
+            <span id="hudMessage" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">空闲：在地图画跑道或选定打卡位置后即可开始</span>
+          </div>
+          <span id="hudCoord" style="font-family:Consolas,monospace;color:#93c5fd;white-space:nowrap;">-</span>
         </div>
         <div class="hud-stats">
           <div class="hud-stat">
@@ -374,7 +408,7 @@
             <div id="hudDistance" class="hud-stat-value">0 m / 0 m</div>
           </div>
           <div class="hud-stat">
-            <div class="hud-stat-label">当前圈数</div>
+            <div class="hud-stat-label">当前圈数 / 趟数</div>
             <div id="hudLap" class="hud-stat-value">0 / 0</div>
           </div>
           <div class="hud-stat">
@@ -386,6 +420,7 @@
             <div id="hudTime" class="hud-stat-value">00:00 / 00:00</div>
           </div>
         </div>
+        <div id="hudLapSplits" class="hud-lap-splits" style="display:none;"></div>
         <div class="progress-track">
           <div id="hudProgress" class="progress-fill"></div>
         </div>
@@ -472,15 +507,16 @@
             <strong>① 搜学校飞到操场：</strong>在右侧卫星图上方输入学校或校区名（例如 <code>西安建筑科技大学</code>，或直接输 <code>纬度,经度</code>），点击结果即可飞过去，点 <code>× 关闭</code> 可收起列表。
           </div>
           <div class="guide-list-item">
-            <strong>② 3 种方式画跑道：</strong>
+            <strong>② 4 种方式设计任意跑道/路段：</strong>
             <ul>
-              <li><strong>400m 标准跑道生成器（最推荐）</strong>：点操场正中心，拖动直道/半径/旋转角度滑块直接对齐卫星图白线；</li>
-              <li><strong>卫星图点击打点</strong>：自己沿操场点出一圈，支持<strong>拖拽微调</strong>和<strong>弯道平滑</strong>；</li>
-              <li><strong>手动改经纬度 / 导入导出</strong>：可在表格里逐行填写精确经纬度，也兼容原版 <code>iOSFakeRun</code> JSON 与 GPX 文件。</li>
+              <li><strong>📍 6点自由跑道（非标准操场首选）</strong>：一键生成 6 个可拖拽节点，任意 200m / 300m 跑道或不规则路线一拖即贴合，再点 <strong>弯道平滑</strong> 即可；</li>
+              <li><strong>🛣️ 往返折返（某一段路）</strong>：把“路线类型”切为 <strong>往返折返</strong>，在路上点 2 个以上点即可自动在道路两侧平滑来回跑；</li>
+              <li><strong>🏟️ 规则跑道生成器</strong>：默认 400m 标准跑道，也可通过滑块调成任意周长；</li>
+              <li><strong>手绘打点 / 手改经纬度</strong>：自由点选，或逐行手写经纬度、导入原版 <code>iOSFakeRun</code> JSON 与 GPX。</li>
             </ul>
           </div>
           <div class="guide-list-item">
-            <strong>③ 调好配速开跑：</strong>设置速度（如 <code>3.2 m/s</code>）和圈数后点 <strong>开始模拟校园跑</strong>，跑步过程中也能随时调速。跑完后软件会保持终点定位，<strong>先在手机 App 里点结束并提交成绩</strong>！
+            <strong>③ 拟真配速与防检测：</strong>默认开启 <strong>先快后慢·体力衰减</strong> 配速（第一圈体力充沛跑得快，后面几圈自然变慢）与沿跑道横向 GPS 漂移；跑完后软件会保持终点定位，<strong>先在手机 App 里点结束并提交成绩</strong>！
           </div>
         </div>
       </div>

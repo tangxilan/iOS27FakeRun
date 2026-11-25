@@ -9,6 +9,7 @@
     baseMapId: 'amap_sat_label',
     waypointsWgs: [], // [[lat, lng], ...]
     closedLoop: true,
+    routeMode: 'loop', // 'loop' | 'shuttle' | 'open'
     pinWgs: null, // [lat, lng]
     trackCenterWgs: null, // [lat, lng]
     device: { connected: false, transport: '', device_info: {} },
@@ -154,7 +155,7 @@
     waypointLayer.clearLayers();
     const mapPts = state.waypointsWgs.map(([lat, lng]) => wgsToMap(lat, lng));
     const polyPts = [...mapPts];
-    if (state.closedLoop && mapPts.length >= 2) {
+    if (state.routeMode === 'loop' && mapPts.length >= 2) {
       polyPts.push(mapPts[0]);
     }
     routeLine.setLatLngs(polyPts);
@@ -187,8 +188,13 @@
       marker.addTo(waypointLayer);
     });
 
-    const len = Coords.routeLengthMeters(state.waypointsWgs, state.closedLoop);
-    $('routeSummary').textContent = `${state.waypointsWgs.length} 点 · ${len.toFixed(1)} m`;
+    const isLoop = state.routeMode === 'loop';
+    let len = Coords.routeLengthMeters(state.waypointsWgs, isLoop);
+    let lenLabel = `${len.toFixed(1)} m`;
+    if (state.routeMode === 'shuttle' && state.waypointsWgs.length >= 2) {
+      lenLabel = `单程 ${len.toFixed(1)} m (往返 ${(len * 2).toFixed(1)} m)`;
+    }
+    $('routeSummary').textContent = `${state.waypointsWgs.length} 点 · ${lenLabel}`;
   }
 
   function renderPinOverlay() {
@@ -409,19 +415,55 @@
   });
 
   // --- Route draw / edit / tools ---
-  $('btnModeDraw').addEventListener('click', () => {
-    state.mapEditMode = 'draw';
-    $('btnModeDraw').classList.add('active');
-    $('btnModeEdit').classList.remove('active');
+  function setEditMode(mode) {
+    state.mapEditMode = mode;
+    $('btnModeDraw').classList.toggle('active', mode === 'draw');
+    $('btnModeEdit').classList.toggle('active', mode === 'edit');
     renderRouteOverlay();
+  }
+
+  function setRouteMode(mode) {
+    state.routeMode = mode;
+    state.closedLoop = mode === 'loop';
+    if ($('selRouteMode').value !== mode) $('selRouteMode').value = mode;
+    $('rowShuttleOffset').style.display = mode === 'shuttle' ? 'flex' : 'none';
+    renderRouteOverlay();
+  }
+
+  $('btnModeDraw').addEventListener('click', () => setEditMode('draw'));
+  $('btnModeEdit').addEventListener('click', () => {
+    setEditMode('edit');
+    toast('已进入拖拽模式，拖动节点可微调位置（右键节点可删除）');
   });
 
-  $('btnModeEdit').addEventListener('click', () => {
-    state.mapEditMode = 'edit';
-    $('btnModeEdit').classList.add('active');
-    $('btnModeDraw').classList.remove('active');
-    renderRouteOverlay();
-    toast('已进入拖拽模式，拖动节点可微调位置（右键节点可删除）');
+  $('selRouteMode').addEventListener('change', (ev) => {
+    setRouteMode(ev.target.value);
+  });
+
+  $('btnSixPointTrack').addEventListener('click', async () => {
+    try {
+      let cWgs = state.trackCenterWgs;
+      if (!cWgs) {
+        const c = map.getCenter();
+        cWgs = mapToWgs(c.lat, c.lng);
+      }
+      const res = await api('/api/route/generate-six-point', 'POST', {
+        center_lat: cWgs[0],
+        center_lng: cWgs[1],
+        center_crs: 'wgs84',
+        length_m: 120.0,
+        width_m: 60.0,
+        rotation_deg: 0.0,
+        counterclockwise: true,
+      });
+      state.waypointsWgs = res.points;
+      setRouteMode('loop');
+      setEditMode('edit');
+      renderWaypointTable();
+      toast(`已生成 6 点自由跑道（约 ${res.length_closed_m} m），请直接拖动 6 个节点对齐场地，也可点“弯道平滑”`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 
   $('btnUndoPoint').addEventListener('click', () => {
@@ -442,11 +484,6 @@
     renderWaypointTable();
   });
 
-  $('chkClosedLoop').addEventListener('change', (ev) => {
-    state.closedLoop = ev.target.checked;
-    renderRouteOverlay();
-  });
-
   $('btnSmoothRoute').addEventListener('click', async () => {
     if (state.waypointsWgs.length < 3) {
       toast('至少需要 3 个节点才能平滑弯道', 'warn');
@@ -455,7 +492,7 @@
     try {
       const res = await api('/api/route/smooth', 'POST', {
         points: state.waypointsWgs,
-        closed: state.closedLoop,
+        closed: state.routeMode === 'loop',
         samples_per_segment: 6,
       });
       state.waypointsWgs = res.points;
@@ -467,7 +504,7 @@
     }
   });
 
-  // --- 400m Track Generator ---
+  // --- Track Generator ---
   async function generateTrackFromControls() {
     if (!state.trackCenterWgs) {
       const c = map.getCenter();
@@ -484,6 +521,8 @@
     $('lblStraight').textContent = straight.toFixed(1);
     $('lblRadius').textContent = radius.toFixed(1);
     $('lblRotation').textContent = rotation.toFixed(0);
+    const estPerim = 2 * straight + 2 * Math.PI * radius;
+    $('lblGenPerimeter').textContent = `(当前约 ${estPerim.toFixed(0)} m)`;
 
     try {
       const res = await api('/api/route/generate-track', 'POST', {
@@ -497,9 +536,7 @@
         counterclockwise: ccw,
       });
       state.waypointsWgs = res.points;
-      state.closedLoop = true;
-      $('chkClosedLoop').checked = true;
-      renderRouteOverlay();
+      setRouteMode('loop');
       renderWaypointTable();
     } catch (err) {
       toast(err.message, 'error');
@@ -650,9 +687,7 @@
       const r = state.savedRoutes.find((x) => x.id === loadBtn.dataset.loadRoute);
       if (!r) return;
       state.waypointsWgs = r.points || [];
-      state.closedLoop = r.closed !== false;
-      $('chkClosedLoop').checked = state.closedLoop;
-      renderRouteOverlay();
+      setRouteMode(r.closed === false ? 'open' : 'loop');
       renderWaypointTable();
       if (state.waypointsWgs.length > 0) {
         const bounds = L.latLngBounds(state.waypointsWgs.map(([lat, lng]) => wgsToMap(lat, lng)));
@@ -761,15 +796,39 @@
     return `${min}'${String(sec).padStart(2, '0')}"`;
   }
 
+  function updatePacePreview() {
+    const base = parseFloat($('inpSpeedMps').value) || 3.2;
+    const prof = $('selPaceProfile').value;
+    const fatPct = Math.max(0, Math.min(40, parseFloat($('inpFatiguePct').value) || 0));
+    const f = fatPct / 100;
+    const showFatigue = prof !== 'steady';
+    $('rowFatiguePct').style.display = showFatigue ? 'flex' : 'none';
+    $('rowEndSprint').style.display = prof === 'fatigue' ? 'flex' : 'none';
+
+    if (prof === 'steady' || f <= 0) {
+      $('pacePreviewChip').textContent = `预计配速：全程匀速约 ${formatPace(1000 / base)}/km (${base.toFixed(1)} m/s)`;
+    } else if (prof === 'negative_split') {
+      const s1 = Math.max(0.2, base * (1 - 0.45 * f));
+      const s2 = base * (1 + 0.45 * f);
+      $('pacePreviewChip').textContent = `预计配速：第1圈 ${formatPace(1000 / s1)}/km → 末圈 ${formatPace(1000 / s2)}/km`;
+    } else {
+      const s1 = base * (1 + 0.55 * f);
+      const s2 = Math.max(0.2, base * Math.max(0.55, 1 - 0.60 * f));
+      $('pacePreviewChip').textContent = `预计配速：第1圈 ${formatPace(1000 / s1)}/km → 末圈 ${formatPace(1000 / s2)}/km`;
+    }
+  }
+
   $('inpSpeedMps').addEventListener('input', () => {
     const spd = parseFloat($('inpSpeedMps').value);
     if (Number.isFinite(spd) && spd > 0.1) {
       $('inpPaceStr').value = formatPace(1000 / spd);
     }
+    updatePacePreview();
   });
 
   $('inpSpeedMps').addEventListener('change', async () => {
     const spd = parseFloat($('inpSpeedMps').value);
+    updatePacePreview();
     if (state.simulation.mode === 'running' || state.simulation.mode === 'paused') {
       if (Number.isFinite(spd) && spd > 0.1) {
         try {
@@ -790,6 +849,7 @@
     if (totalSec <= 0) return;
     const spd = Number((1000 / totalSec).toFixed(2));
     $('inpSpeedMps').value = spd;
+    updatePacePreview();
     if (state.simulation.mode === 'running' || state.simulation.mode === 'paused') {
       try {
         await api('/api/run/params', 'POST', { speed_mps: spd });
@@ -800,14 +860,18 @@
     }
   });
 
-  ['inpSpeedJitter', 'inpGpsDrift', 'inpInterval'].forEach((id) => {
+  ['inpSpeedJitter', 'inpGpsDrift', 'inpInterval', 'selPaceProfile', 'inpFatiguePct', 'chkEndSprint'].forEach((id) => {
     $(id).addEventListener('change', async () => {
+      updatePacePreview();
       if (state.simulation.mode === 'running' || state.simulation.mode === 'paused') {
         try {
           await api('/api/run/params', 'POST', {
             speed_jitter_pct: parseFloat($('inpSpeedJitter').value) || 0,
             gps_drift_m: parseFloat($('inpGpsDrift').value) || 0,
             interval_s: parseFloat($('inpInterval').value) || 1.0,
+            pace_profile: $('selPaceProfile').value,
+            fatigue_pct: parseFloat($('inpFatiguePct').value) || 0,
+            end_sprint: $('chkEndSprint').checked,
           });
         } catch {
           // ignore
@@ -815,6 +879,7 @@
       }
     });
   });
+  $('inpFatiguePct').addEventListener('input', updatePacePreview);
 
   $('selLimitMode').addEventListener('change', (ev) => {
     const isLaps = ev.target.value === 'laps';
@@ -986,6 +1051,7 @@
       mode === 'running' || mode === 'paused' || mode === 'completed_holding' ? 'block' : 'none';
     $('btnStopPin').style.display = mode === 'pinned' ? 'block' : 'none';
 
+    $('hudPhaseBadge').textContent = state.simulation.phase_label || '待机';
     $('hudMessage').textContent = state.simulation.message || '空闲';
     if (state.simulation.current_lat != null) {
       $('hudCoord').textContent = `WGS84 ${state.simulation.current_lat.toFixed(6)}, ${state.simulation.current_lng.toFixed(6)}`;
@@ -999,18 +1065,34 @@
     $('hudTime').textContent = `${formatDuration(state.simulation.elapsed_s)} / ${formatDuration(state.simulation.eta_s)}`;
     $('hudProgress').style.width = `${Math.min(100, Math.max(0, state.simulation.progress_pct || 0))}%`;
 
+    const splitsBox = $('hudLapSplits');
+    const splits = Array.isArray(state.simulation.lap_stats) ? state.simulation.lap_stats : [];
+    if (splits.length > 0) {
+      splitsBox.style.display = 'flex';
+      splitsBox.innerHTML = '';
+      splits.forEach((sp) => {
+        const chip = document.createElement('span');
+        chip.className = 'hud-lap-chip';
+        chip.textContent = `第${sp.lap}圈 ${formatPace(sp.pace_sec_per_km)} (${sp.avg_speed_mps}m/s)`;
+        splitsBox.appendChild(chip);
+      });
+    } else {
+      splitsBox.style.display = 'none';
+    }
+
     renderSimulationOverlay();
   }
 
   $('btnStartRun').addEventListener('click', async () => {
     if (state.waypointsWgs.length < 2) {
-      toast('请先在右侧地图点击至少 2 个点（或用 400m 跑道生成器）', 'warn');
+      toast('请先在右侧地图点击至少 2 个点（或点“6点自由跑道”/“规则跑道生成器”）', 'warn');
       return;
     }
     try {
       const res = await api('/api/run/start', 'POST', {
         points: state.waypointsWgs,
-        closed_loop: state.closedLoop,
+        closed_loop: state.routeMode === 'loop',
+        route_mode: state.routeMode,
         speed_mps: parseFloat($('inpSpeedMps').value) || 3.0,
         mode_limit: $('selLimitMode').value,
         laps: parseInt($('inpLaps').value, 10) || 5,
@@ -1019,6 +1101,10 @@
         speed_jitter_pct: parseFloat($('inpSpeedJitter').value) || 0,
         gps_drift_m: parseFloat($('inpGpsDrift').value) || 0,
         smooth_curves: $('chkSmoothRun').checked,
+        pace_profile: $('selPaceProfile').value,
+        fatigue_pct: parseFloat($('inpFatiguePct').value) || 0,
+        end_sprint: $('chkEndSprint').checked,
+        shuttle_lane_offset_m: parseFloat($('inpShuttleOffset').value) || 1.8,
       });
       applySimulationState(res.simulation);
       toast('已开始模拟校园跑', 'success');
@@ -1501,10 +1587,13 @@
       $('lanUrlsBox').textContent = urls.length ? urls.join('  |  ') : '（当前未检测到局域网 IP）';
 
       const last = snap.last_state || {};
+      if (last.route_mode) {
+        setRouteMode(last.route_mode);
+      } else if (last.closed_loop === false) {
+        setRouteMode('open');
+      }
       if (Array.isArray(last.route_points) && last.route_points.length) {
         state.waypointsWgs = last.route_points;
-        state.closedLoop = last.closed_loop !== false;
-        $('chkClosedLoop').checked = state.closedLoop;
         renderRouteOverlay();
         renderWaypointTable();
         const bounds = L.latLngBounds(state.waypointsWgs.map(([lat, lng]) => wgsToMap(lat, lng)));
@@ -1517,6 +1606,10 @@
         $('inpSpeedMps').value = last.speed_mps;
         $('inpPaceStr').value = formatPace(1000 / last.speed_mps);
       }
+      if (last.pace_profile) $('selPaceProfile').value = last.pace_profile;
+      if (last.fatigue_pct !== undefined) $('inpFatiguePct').value = last.fatigue_pct;
+      if (last.end_sprint !== undefined) $('chkEndSprint').checked = Boolean(last.end_sprint);
+      updatePacePreview();
       if (last.laps) $('inpLaps').value = last.laps;
       if (last.target_distance_m) $('inpTargetDistance').value = last.target_distance_m;
     } catch {

@@ -20,7 +20,7 @@ def test_check_environment_shape():
     assert "ready" in info
     assert info["apple_driver"]["status"] in ("ok", "stopped", "missing")
     assert info["webview2"]["status"] in ("ok", "missing")
-    assert info["runtime"]["version"] == "1.1.0"
+    assert info["runtime"]["version"] == "1.2.0"
 
 
 def test_env_check_and_open_url_api(tmp_path):

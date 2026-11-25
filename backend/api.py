@@ -26,6 +26,7 @@ from .paths import APP_VERSION, get_data_dir, get_resource_dir
 from .route_utils import (
     export_gpx,
     export_iosfakerun_json,
+    generate_six_point_track,
     generate_standard_track,
     parse_route_text,
     route_length_meters,
@@ -111,14 +112,19 @@ class DeviceActionRequest(BaseModel):
 class StartRunRequest(BaseModel):
     points: list[list[float]]
     closed_loop: bool = True
+    route_mode: str = Field(default="loop", pattern="^(loop|shuttle|open)$")
     speed_mps: float = Field(default=3.0, gt=0.1, le=30.0)
     mode_limit: str = Field(default="laps", pattern="^(laps|distance)$")
     laps: int = Field(default=5, ge=1, le=500)
     target_distance_m: float = Field(default=2000.0, ge=10.0, le=200000.0)
     interval_s: float = Field(default=1.0, ge=0.2, le=5.0)
     speed_jitter_pct: float = Field(default=8.0, ge=0.0, le=40.0)
-    gps_drift_m: float = Field(default=0.8, ge=0.0, le=10.0)
+    gps_drift_m: float = Field(default=1.5, ge=0.0, le=10.0)
     smooth_curves: bool = False
+    pace_profile: str = Field(default="fatigue", pattern="^(fatigue|steady|negative_split)$")
+    fatigue_pct: float = Field(default=18.0, ge=0.0, le=40.0)
+    end_sprint: bool = False
+    shuttle_lane_offset_m: float = Field(default=1.8, ge=0.0, le=8.0)
 
 
 class UpdateRunParamsRequest(BaseModel):
@@ -126,6 +132,9 @@ class UpdateRunParamsRequest(BaseModel):
     speed_jitter_pct: Optional[float] = Field(default=None, ge=0.0, le=40.0)
     gps_drift_m: Optional[float] = Field(default=None, ge=0.0, le=10.0)
     interval_s: Optional[float] = Field(default=None, ge=0.2, le=5.0)
+    pace_profile: Optional[str] = Field(default=None, pattern="^(fatigue|steady|negative_split)$")
+    fatigue_pct: Optional[float] = Field(default=None, ge=0.0, le=40.0)
+    end_sprint: Optional[bool] = None
 
 
 class StopRunRequest(BaseModel):
@@ -167,6 +176,16 @@ class GenerateTrackRequest(BaseModel):
     radius_m: float = Field(default=36.8, ge=5.0, le=150.0)
     rotation_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
     points_per_lap: int = Field(default=60, ge=16, le=360)
+    counterclockwise: bool = True
+
+
+class GenerateSixPointRequest(BaseModel):
+    center_lat: float = Field(ge=-90.0, le=90.0)
+    center_lng: float = Field(ge=-180.0, le=180.0)
+    center_crs: str = "wgs84"
+    length_m: float = Field(default=120.0, ge=20.0, le=1000.0)
+    width_m: float = Field(default=60.0, ge=10.0, le=500.0)
+    rotation_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
     counterclockwise: bool = True
 
 
@@ -355,15 +374,20 @@ def create_app(
                 {
                     "route_points": [[round(p[0], 7), round(p[1], 7)] for p in pts],
                     "closed_loop": req.closed_loop,
+                    "route_mode": req.route_mode,
                     "speed_mps": req.speed_mps,
                     "laps": req.laps,
                     "target_distance_m": req.target_distance_m,
                     "mode_limit": req.mode_limit,
+                    "pace_profile": req.pace_profile,
+                    "fatigue_pct": req.fatigue_pct,
+                    "end_sprint": req.end_sprint,
                 }
             )
             cfg = RunConfig(
                 points=pts,
                 closed_loop=req.closed_loop,
+                route_mode=req.route_mode,
                 speed_mps=req.speed_mps,
                 mode_limit=req.mode_limit,
                 laps=req.laps,
@@ -372,6 +396,10 @@ def create_app(
                 speed_jitter_pct=req.speed_jitter_pct,
                 gps_drift_m=req.gps_drift_m,
                 smooth_curves=req.smooth_curves,
+                pace_profile=req.pace_profile,
+                fatigue_pct=req.fatigue_pct,
+                end_sprint=req.end_sprint,
+                shuttle_lane_offset_m=req.shuttle_lane_offset_m,
             )
             state = await engine.start_run(cfg)
             return {"ok": True, "simulation": state}
@@ -404,6 +432,9 @@ def create_app(
                 speed_jitter_pct=req.speed_jitter_pct,
                 gps_drift_m=req.gps_drift_m,
                 interval_s=req.interval_s,
+                pace_profile=req.pace_profile,
+                fatigue_pct=req.fatigue_pct,
+                end_sprint=req.end_sprint,
             )
             return {"ok": True, "simulation": state}
         except ValueError as exc:
@@ -484,6 +515,23 @@ def create_app(
             radius_m=req.radius_m,
             rotation_deg=req.rotation_deg,
             points_per_lap=req.points_per_lap,
+            counterclockwise=req.counterclockwise,
+        )
+        return {
+            "ok": True,
+            "points": [[round(lat, 7), round(lng, 7)] for lat, lng in pts],
+            "length_closed_m": round(route_length_meters(pts, closed=True), 1),
+        }
+
+    @app.post("/api/route/generate-six-point")
+    async def generate_six_point(req: GenerateSixPointRequest) -> dict[str, Any]:
+        c_lat, c_lng = to_wgs84(req.center_lat, req.center_lng, req.center_crs)
+        pts = generate_six_point_track(
+            center_lat=c_lat,
+            center_lng=c_lng,
+            length_m=req.length_m,
+            width_m=req.width_m,
+            rotation_deg=req.rotation_deg,
             counterclockwise=req.counterclockwise,
         )
         return {

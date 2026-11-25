@@ -72,3 +72,44 @@ def test_pin_nudge_and_clear():
         assert engine.telemetry.mode == "idle"
 
     asyncio.run(_scenario())
+
+
+def test_fatigue_pace_lap_splits_and_shuttle_frenet_drift():
+    async def _scenario() -> None:
+        dev = FakeDevice()
+        engine = SimulationEngine(device=dev)
+        # Straight road segment in shuttle mode (~15m one way -> ~32m round trip)
+        road = [(34.0160, 108.7490), (34.016135, 108.7490)]
+        await engine.start_run(
+            RunConfig(
+                points=road,
+                route_mode="shuttle",
+                speed_mps=25.0,
+                mode_limit="laps",
+                laps=3,
+                interval_s=0.2,
+                speed_jitter_pct=0.0,
+                gps_drift_m=1.5,
+                pace_profile="fatigue",
+                fatigue_pct=25.0,
+                end_sprint=False,
+                shuttle_lane_offset_m=1.8,
+            )
+        )
+        for _ in range(40):
+            if engine.telemetry.mode == "completed_holding":
+                break
+            await asyncio.sleep(0.15)
+        assert engine.telemetry.mode == "completed_holding"
+        splits = engine.telemetry.lap_stats
+        assert len(splits) == 3
+        # First lap must be strictly faster than final lap under fatigue curve
+        assert splits[0]["avg_speed_mps"] > splits[-1]["avg_speed_mps"]
+        assert splits[-1]["pace_sec_per_km"] > splits[0]["pace_sec_per_km"]
+        # Frenet-frame drift never causes huge jumps between consecutive points
+        for p1, p2 in zip(dev.points, dev.points[1:]):
+            assert haversine_distance(p1[0], p1[1], p2[0], p2[1]) < 15.0
+
+        await engine.reset_real_location()
+
+    asyncio.run(_scenario())

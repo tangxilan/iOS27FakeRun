@@ -349,3 +349,150 @@ def sample_point_at_distance(
     lat = p1[0] + (p2[0] - p1[0]) * t
     lng = p1[1] + (p2[1] - p1[1]) * t
     return lat, lng, hdg
+
+
+def generate_six_point_track(
+    center_lat: float,
+    center_lng: float,
+    length_m: float = 120.0,
+    width_m: float = 60.0,
+    rotation_deg: float = 0.0,
+    counterclockwise: bool = True,
+) -> list[Point]:
+    """Generate 6 draggable anchor points forming an oval/hex track of arbitrary dimensions."""
+    half_l = max(10.0, float(length_m) / 2.0)
+    half_w = max(5.0, float(width_m) / 2.0)
+    # 4 straight-side corners + 2 curved-end apexes (6 points total).
+    straight_half = half_l * 0.55
+    local_pts: list[tuple[float, float]] = [
+        (-straight_half, half_w),   # East straight south corner
+        (straight_half, half_w),    # East straight north corner
+        (half_l, 0.0),              # North apex
+        (straight_half, -half_w),   # West straight north corner
+        (-straight_half, -half_w),  # West straight south corner
+        (-half_l, 0.0),             # South apex
+    ]
+    if not counterclockwise:
+        local_pts = [local_pts[0], *reversed(local_pts[1:])]
+
+    rad = math.radians(rotation_deg)
+    cos_r = math.cos(rad)
+    sin_r = math.sin(rad)
+
+    out: list[Point] = []
+    for n0, e0 in local_pts:
+        east = e0 * cos_r + n0 * sin_r
+        north = -e0 * sin_r + n0 * cos_r
+        out.append(offset_meters(center_lat, center_lng, north, east))
+    return out
+
+
+def build_shuttle_route(points: Sequence[Point], lane_offset_m: float = 1.8) -> list[Point]:
+    """Build a closed out-and-back road shuttle loop with lateral lane separation and U-turn arcs."""
+    pts = list(points)
+    if len(pts) < 2:
+        raise ValueError("往返折返路线至少需要 2 个路径点")
+
+    lane = max(0.0, min(8.0, float(lane_offset_m)))
+
+    def _vertex_right_normal(idx: int) -> tuple[float, float]:
+        if idx == 0:
+            hdg = bearing_deg(pts[0][0], pts[0][1], pts[1][0], pts[1][1])
+        elif idx == len(pts) - 1:
+            hdg = bearing_deg(pts[-2][0], pts[-2][1], pts[-1][0], pts[-1][1])
+        else:
+            h1 = bearing_deg(pts[idx - 1][0], pts[idx - 1][1], pts[idx][0], pts[idx][1])
+            h2 = bearing_deg(pts[idx][0], pts[idx][1], pts[idx + 1][0], pts[idx + 1][1])
+            # Circular mean of headings
+            sx = math.sin(math.radians(h1)) + math.sin(math.radians(h2))
+            cx = math.cos(math.radians(h1)) + math.cos(math.radians(h2))
+            hdg = math.degrees(math.atan2(sx, cx))
+        right_rad = math.radians(hdg + 90.0)
+        return math.cos(right_rad), math.sin(right_rad)
+
+    if lane <= 0.05:
+        # Pure out-and-back back to start
+        return [*pts, *reversed(pts[:-1])]
+
+    half_lane = lane * 0.5
+    outbound: list[Point] = []
+    inbound: list[Point] = []
+    for i, (lat, lng) in enumerate(pts):
+        rn, re = _vertex_right_normal(i)
+        outbound.append(offset_meters(lat, lng, rn * half_lane, re * half_lane))
+        inbound.append(offset_meters(lat, lng, -rn * half_lane, -re * half_lane))
+
+    # Add smooth U-turn midpoint apex at far end & start end
+    end_hdg = math.radians(bearing_deg(pts[-2][0], pts[-2][1], pts[-1][0], pts[-1][1]))
+    far_apex = offset_meters(
+        pts[-1][0], pts[-1][1], math.cos(end_hdg) * half_lane, math.sin(end_hdg) * half_lane
+    )
+    start_hdg = math.radians(bearing_deg(pts[0][0], pts[0][1], pts[1][0], pts[1][1]))
+    near_apex = offset_meters(
+        pts[0][0], pts[0][1], -math.cos(start_hdg) * half_lane, -math.sin(start_hdg) * half_lane
+    )
+
+    return [*outbound, far_apex, *reversed(inbound), near_apex, outbound[0]]
+
+
+def compute_pace_multiplier(
+    progress: float,
+    profile: str = "fatigue",
+    fatigue_pct: float = 18.0,
+    end_sprint: bool = False,
+) -> tuple[float, str]:
+    """Return (speed_multiplier, chinese_phase_label) for normalized run progress in [0, 1]."""
+    p = max(0.0, min(1.0, float(progress)))
+    prof = (profile or "fatigue").strip().lower()
+    f = max(0.0, min(0.40, float(fatigue_pct) / 100.0))
+
+    if prof == "steady" or (prof == "fatigue" and f <= 1e-6 and not end_sprint):
+        return 1.0, "匀速巡航"
+
+    if prof == "negative_split":
+        low = max(0.60, 1.0 - 0.45 * f)
+        high = 1.0 + 0.45 * f
+        if p < 0.04:
+            t = p / 0.04
+            return low * (0.92 + 0.08 * t), "起步热身"
+        # Smooth cosine ease-in-out from low -> high
+        s = 0.5 * (1.0 - math.cos(math.pi * ((p - 0.04) / 0.96)))
+        mult = low + (high - low) * s
+        if p < 0.35:
+            return mult, "前段·热身慢起"
+        if p < 0.75:
+            return mult, "中段·稳步提速"
+        return mult, "后段·加速冲刺"
+
+    # Default: "fatigue" — fast energized opening lap(s), progressively slower in later laps.
+    peak_mult = 1.0 + 0.55 * f
+    trough_mult = max(0.55, 1.0 - 0.60 * f)
+
+    if p < 0.03:
+        t = p / 0.03
+        mult = 0.88 + (peak_mult - 0.88) * math.sin(t * math.pi * 0.5)
+        return mult, "起步加速"
+
+    if p < 0.22:
+        # Hold high energized opening pace with very mild early settle
+        local = (p - 0.03) / 0.19
+        mult = peak_mult - 0.08 * f * local
+        return mult, "前段·体力充沛"
+
+    decay_end = 0.92 if end_sprint else 1.0
+    if p <= decay_end:
+        t = (p - 0.22) / max(1e-6, decay_end - 0.22)
+        # Smooth nonlinear stamina curve (gentle mid-run, noticeably tired toward end)
+        eased = t ** 1.15
+        start_val = peak_mult - 0.08 * f
+        mult = start_val + (trough_mult - start_val) * eased
+        if p < 0.58:
+            return mult, "中段·配速回落"
+        return mult, "后段·体力下降"
+
+    # Optional final finish kick (92% -> 100%)
+    t = (p - 0.92) / 0.08
+    kick_target = min(1.05, trough_mult * 1.08)
+    mult = trough_mult + (kick_target - trough_mult) * math.sin(t * math.pi * 0.5)
+    return mult, "终点前·小幅冲刺"
+

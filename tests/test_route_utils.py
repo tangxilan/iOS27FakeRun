@@ -4,8 +4,11 @@ import pytest
 
 from backend.route_utils import (
     build_polyline_distances,
+    build_shuttle_route,
+    compute_pace_multiplier,
     export_gpx,
     export_iosfakerun_json,
+    generate_six_point_track,
     generate_standard_track,
     parse_route_text,
     route_length_meters,
@@ -67,3 +70,36 @@ def test_smooth_and_sample():
     assert 39.989 < lat < 39.992
     assert 116.309 < lng < 116.312
     assert 0.0 <= hdg < 360.0
+
+
+def test_generate_six_point_and_shuttle_route():
+    pts = generate_six_point_track(34.0165, 108.7496, length_m=100.0, width_m=50.0, rotation_deg=25.0)
+    assert len(pts) == 6
+    closed_len = route_length_meters(pts, closed=True)
+    assert 220.0 <= closed_len <= 320.0
+
+    road = [(34.0160, 108.7490), (34.0170, 108.7490)]
+    shuttle = build_shuttle_route(road, lane_offset_m=2.0)
+    assert len(shuttle) >= 6
+    # Start and end connect smoothly as a closed round-trip
+    assert shuttle[0] == shuttle[-1]
+    shuttle_len = route_length_meters(shuttle, closed=False)
+    one_way_len = route_length_meters(road, closed=False)
+    assert math.isclose(shuttle_len, one_way_len * 2.0, rel_tol=0.1)
+
+
+def test_compute_pace_multiplier_profiles():
+    early_m, early_lbl = compute_pace_multiplier(0.10, profile="fatigue", fatigue_pct=20.0, end_sprint=False)
+    mid_m, _ = compute_pace_multiplier(0.50, profile="fatigue", fatigue_pct=20.0, end_sprint=False)
+    late_m, late_lbl = compute_pace_multiplier(0.95, profile="fatigue", fatigue_pct=20.0, end_sprint=False)
+    assert early_m > 1.0 > late_m
+    assert early_m > mid_m > late_m
+    assert "充沛" in early_lbl
+    assert "下降" in late_lbl
+
+    steady_m, _ = compute_pace_multiplier(0.80, profile="steady", fatigue_pct=20.0)
+    assert steady_m == 1.0
+
+    neg_early, _ = compute_pace_multiplier(0.15, profile="negative_split", fatigue_pct=20.0)
+    neg_late, _ = compute_pace_multiplier(0.90, profile="negative_split", fatigue_pct=20.0)
+    assert neg_late > neg_early
